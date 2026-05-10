@@ -1,0 +1,25 @@
+# ----------------------------------------------------------------------------
+# Example terraform.tfvars
+#
+# Copy this file to terraform.tfvars and fill in real values. The actual
+# terraform.tfvars file is gitignored and must never be committed.
+#
+# All variables defined in variables.tf have sensible defaults. The only
+# variable WITHOUT a default is admin_password - you must set it.
+#
+# Override any other variable here if your environment differs from defaults.
+# ----------------------------------------------------------------------------
+
+# REQUIRED - admin password for both VMs.
+# Per the assessment: "ElektaDevopsTest123!"
+admin_password = "REPLACE_ME"
+
+# OPTIONAL - override only if your admin IP differs from the default.
+# Find yours with:  curl ifconfig.me
+# Then set in CIDR notation, e.g. "203.0.113.10/32"
+# admin_source_ip = "1.2.3.4/32"
+
+# OPTIONAL - other variables you can override:
+# location               = "westus"
+# resource_group_name    = "elekta-devops-test"
+# vm_size                = "Stand# vm_size                = "Stand# vm_size                = "Stand# vm_size  xes = ["10.0.1.0/24"]
