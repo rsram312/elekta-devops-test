@@ -115,7 +115,6 @@ There are two paths: **local** (for development) and **pipeline-driven** (for pr
 cd terraform
 
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars: set admin_password to "ElektaDevopsTest123!"
 # Set admin_source_ip to your public IP (curl ifconfig.me) if different.
 
 terraform init
@@ -156,7 +155,7 @@ The pipeline also publishes `tf-outputs.json` as a pipeline artifact after each 
 
 RDP to either VM's public IP using:
 - Username: `Elekta`
-- Password: `ElektaDevopsTest123!`
+- Password: <password>
 
 From inside one VM you can RDP to the other over its private IP (`10.0.1.4` or `10.0.1.5`). Verified end-to-end during development.
 
