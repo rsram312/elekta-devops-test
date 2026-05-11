@@ -30,10 +30,10 @@ Runs after Validate succeeds.
 
 | Step | Purpose |
 | --- | --- |
-| `terraform init` | Re-initialize on the fresh agent (each job runs on a clean Microsoft-hosted VM, nothing persists between stages). |
+| `terraform init` | Re-initialize on the fresh agent (each job runs on a clean Microsoft-hosted VM; nothing persists between stages). |
 | `terraform plan -out=tfplan` | Generate the plan file. |
-| `terraform show -no-color tfplan > tfplan.txt` | Human-readable copy of the plan, for review and audit. |
-| Publish artifact `tfplan` | The binary plan file is saved so the apply stage applies the *exact* plan that was reviewed. |
+| `terraform show -no-color tfplan > tfplan.txt` | Produce a human-readable plan summary for review. |
+| Publish artifact `tfplan` | Save the exact plan file so the Apply stage uses the reviewed plan. |
 
 ### Stage 3 - Apply
 
@@ -43,19 +43,19 @@ Runs only on `main` branch builds (not PRs). Bound to the `prod` Azure DevOps En
 | --- | --- |
 | Download `tfplan` artifact | Use the same plan that was reviewed and approved. |
 | `terraform init` | Required again on the fresh agent. |
-| `terraform apply -auto-approve tfplan` | Apply the saved plan. No `-var-file` needed - the plan already encodes inputs. |
-| `terraform output -json > tf-outputs.json` + publish artifact `tf-outputs` | Resource names, public IPs, private IPs are captured for downstream automation. |
+| `terraform apply -auto-approve tfplan` | Apply the saved plan. No `-var-file` needed; the plan already encodes inputs. |
+| `terraform output -json > tf-outputs.json` + publish artifact `tf-outputs` | Capture resource outputs for downstream automation. |
 
 ## Authentication
 
-The pipeline authenticates to Azure using **Workload Identity Federation (OIDC)**. The service connection's federated identity is mapped to ARM environment variables:
+The pipeline authenticates to Azure using **Workload Identity Federation (OIDC)**. The service connection's federated identity maps to ARM environment variables:
 
 - `ARM_CLIENT_ID`
 - `ARM_OIDC_TOKEN`
 - `ARM_TENANT_ID`
 - `ARM_SUBSCRIPTION_ID` (resolved via `az account show`)
 
-The same federated identity is used to access blob state - no storage account key is ever handed to the pipeline.
+The same federated identity is used to access blob state. No storage account key is handed to the pipeline.
 
 ## State management
 
@@ -77,18 +77,29 @@ The pipeline assumes the following resources exist in the Azure DevOps organizat
 Install at the organization level. Provides the `TerraformInstaller@1` task.
 
 ### 2. Service connection (Azure RM) - `azure-elekta-devops`
-### 2. Service connectervice connections -> New service connection -> Azure Resource Manager -> Workload Identity federation (automatic) -> Subscription scope -> Save as `azure-elekta-devops`.
+
+Project settings -> Service connections -> New service connection -> Azure Resource Manager -> Workload Identity federation (automatic) -> Subscription scope -> Save as `azure-elekta-devops`.
 
 After creation, grant the auto-created Service Principal `Storage Blob Data Contributor` on the state storage account:
 
 ```bash
-# Get the SP Object ID from "Manage Service Principal" -> Enterprise Applications -> Object ID# Get the SP Object ID from "Manage Service Principal" -> Enterpriste# Get the SP Object ID from "Manage Service Principal" -> Enterprise Appsign# Get the SP Object ID from "Manage Service Principal" -> Enterprise Applications -> Object ID# Get the SP Ontribut# Get the SP Object ID from "
-################################################################################################e `e############################################################################adlock icon). Value is the VM admin password.
+# Get the SP Object ID from "Manage Service Principal" -> Enterprise Applications -> Object ID
+SP_OBJECT_ID="<paste-here>"
 
-The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.Tld The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefixvia tTh `enviThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.Tld The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea.
+# Grant role
+SA_ID=$(az storage account show -g "rg-tfstate" -n "elektatfstate" --query id -o tsv)
+az role assignment create --assignee-object-id "$SP_OBJECT_ID" --assignee-principal-type ServicePrincipal --role "Storage Blob Data Contributor" --scope "$SA_ID"
+```
 
+### 3. Environment - `prod`
 
-he `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix means TerrafoThe `TF_VAR_` prefix mea 4.The `TF_VAR_` prefix means Terod environment approval) |
+Pipelines -> Environments -> New environment -> Name: `prod` -> Manual approval -> Add yourself as approver.
+
+### 4. Variable group - `elekta-devops-secrets`
+
+Pipelines -> Library -> Variable groups -> New variable group -> Name: `elekta-devops-secrets` -> Add variable `TF_VAR_admin_password` (padlock icon). Value is the VM admin password.
+
+The `TF_VAR_` prefix means Terraform automatically picks it up as a variable. Link this variable group to the pipeline.
 
 ## Failure modes worth knowing
 
