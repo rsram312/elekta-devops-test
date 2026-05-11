@@ -1,0 +1,199 @@
+###############################################################################
+# Elekta DevOps Test - Terraform CI/CD pipeline
+#
+# Stages:
+#   1. Validate  - fmt -check, init (against remote backend), validate
+#   2. Plan      - terraform plan, saves the plan as a pipeline artifact
+#   3. Apply     - downloads the saved plan and applies it. Bound to the
+#                  'prod' Environment, so the approval gate kicks in here.
+#
+# Auth: Workload Identity Federation (OIDC) via the
+# 'azure-elekta-devops' Azure RM service connection. No client secrets stored.
+#
+# Secret: TF_VAR_admin_password is sourced from the
+# 'elekta-devops-secrets' variable group.
+###############################################################################
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - terraform/**
+      - azure-pipelines.yml
+
+pr:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - terraform/**
+      - azure-pipelines.yml
+
+variables:
+  - name: terraformVersion
+    value: 1.9.8
+  - name: workingDirectory
+    value: $(Build.SourcesDirectory)/terraform
+  - name: serviceConnection
+    value: azure-elekta-devops
+  - group: elekta-devops-secrets   # Provides TF_VAR_admin_password
+
+stages:
+  # ---------------------------------------------------------------------------
+  # Stage 1: Validate
+  # ---------------------------------------------------------------------------
+  - stage: Validate
+    displayName: Validate Terraform
+    jobs:
+      - job: validate
+        displayName: fmt + init + validate
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform $(terraformVersion)
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          - script: terraform fmt -check -recursive
+            displayName: terraform fmt -check
+            workingDirectory: $(workingDirectory)
+
+          - task: AzureCLI@2
+            displayName: terraform init
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              workingDirectory: $(workingDirectory)
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                export ARM_USE_OIDC=true
+                terraform init -input=false
+
+          - script: terraform validate
+            displayName: terraform validate
+            workingDirectory: $(workingDirectory)
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: Plan
+  # ---------------------------------------------------------------------------
+  - stage: Plan
+    displayName: Plan
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: plan
+        displayName: terraform plan
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform $(terraformVersion)
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          - task: AzureCLI@2
+            displayName: terraform init + plan
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              workingDirectory: $(workingDirectory)
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                export ARM_USE_OIDC=true
+                export TF_VAR_admin_password="$(TF_VAR_admin_password)"
+
+                terraform init -input=false
+                terraform plan -input=false -out=tfplan
+                terraform show -no-color tfplan > tfplan.txt
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish tfplan artifact
+            inputs:
+              targetPath: $(workingDirectory)
+              artifact: tfplan
+              publishLocation: pipeline
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Apply
+  # ---------------------------------------------------------------------------
+  # Only runs on main branch builds (not PRs).
+  # Bound to the 'prod' Environment - approval check on that environment
+  # gates the actual apply.
+  # ---------------------------------------------------------------------------
+  - stage: Apply
+    displayName: Apply (with approval)
+    dependsOn: Plan
+    condition: |
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        ne(variables['Build.Reason'], 'PullRequest')
+      )
+    jobs:
+      - deployment: apply
+        displayName: terraform apply
+        pool:
+          vmImage: ubuntu-latest
+        environment: prod      # Approval gate lives on this Environment
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: TerraformInstaller@1
+                  displayName: Install Terraform $(terraformVersion)
+                  inputs:
+                    terraformVersion: $(terraformVersion)
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download tfplan artifact
+                  inputs:
+                    artifactName: tfplan
+                    targetPath: $(workingDirectory)
+
+                - task: AzureCLI@2
+                  displayName: terraform init + apply
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    workingDirectory: $(workingDirectory)
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_OIDC_TOKEN="$idToken"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                      export ARM_USE_OIDC=true
+                      export TF_VAR_admin_password="$(TF_VAR_admin_password)"
+
+                      terraform init -input=false
+                      terraform apply -input=false -auto-approve tfplan
+                      terraform output -json > tf-outputs.json
+
+                - task: PublishPipelineArtifact@1
+                  displayName: Publish tf-outputs
+                  inputs:
+                    targetPath: $(workingDirectory)/tf-outputs.json
+                    artifact: tf-outputs
+                    publishLocation: pipeline
