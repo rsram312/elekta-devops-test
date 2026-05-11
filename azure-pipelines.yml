@@ -127,7 +127,7 @@ stages:
           - task: PublishPipelineArtifact@1
             displayName: Publish tfplan artifact
             inputs:
-              targetPath: $(workingDirectory)
+              targetPath: $(workingDirectory)/tfplan
               artifact: tfplan
               publishLocation: pipeline
 
